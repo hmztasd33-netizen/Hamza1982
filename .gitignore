@@ -1,0 +1,178 @@
+import streamlit as st
+import pandas as pd
+
+# إعدادات الصفحة لتناسب شاشات الموبايل
+st.set_page_config(page_title="تطبيق شجرة العشيرة", page_icon="🌳", layout="centered")
+
+# 1. محاكاة قاعدة البيانات (باستخدام الذاكرة المؤقتة)
+if 'users' not in st.session_state:
+    st.session_state.users = pd.DataFrame([
+        {"id": 1, "name": "الشيخ أبو طاهر", "role": "مدير العشيرة", "family_id": 0, "phone": "07700000000"},
+        {"id": 2, "name": "أبو أحمد (رئيس الفرع 1)", "role": "رئيس فرع (أب)", "family_id": 1, "phone": "07711111111"},
+        {"id": 3, "name": "أحمد (ابن أبو أحمد)", "role": "فرد (ابن)", "family_id": 1, "phone": "07722222222"},
+        {"id": 4, "name": "أبو سجاد (رئيس الفرع 2)", "role": "رئيس فرع (أب)", "family_id": 2, "phone": "07733333333"},
+        {"id": 5, "name": "سجاد (ابن أبو سجاد)", "role": "فرد (ابن)", "family_id": 2, "phone": "07744444444"}
+    ])
+
+if 'messages' not in st.session_state:
+    st.session_state.messages = []
+
+if 'finance' not in st.session_state:
+    st.session_state.finance = []
+
+# 2. نظام تسجيل الدخول الافتراضي للمعاينة
+st.title("🌳 نظام إدارة العشيرة الذكي")
+st.sidebar.header("🔑 بوابة تسجيل الدخول")
+user_names = st.sidebar.selectbox("اختر الحساب لمعاينة الصلاحيات:", st.session_state.users['name'].tolist())
+current_user = st.session_state.users[st.session_state.users['name'] == user_names].iloc[0]
+
+st.sidebar.info(f"المستخدم الحالي: {current_user['name']}\n\nالصفة: {current_user['role']}")
+
+# القائمة الرئيسية للتطبيق
+menu = st.tabs(["🌳 شجرة العائلة", "💬 غرفة العائلة", "💳 الصندوق المالي", "🛠️ لوحة الإدارة والتعديل"])
+
+# --- التبويب الأول: شجرة العائلة ---
+with menu[0]:
+    st.header("🌳 فروع وشجرة العشيرة")
+    st.write("هيكل العشيرة الحالي ورؤساء الفروع المعينين:")
+    
+    # عرض الشجرة بشكل مبسط
+    for idx, row in st.session_state.users[st.session_state.users['role'] == "رئيس فرع (أب)"].iterrows():
+        st.subheader(f"🔹 فرع {row['name']}")
+        # جلب الأولاد التابعين لهذا الفرع
+        sub_users = st.session_state.users[(st.session_state.users['family_id'] == row['family_id']) & (st.session_state.users['role'] == "فرد (ابن)")]
+        for _, sub_row in sub_users.iterrows():
+            st.write(f"└── 👤 {sub_row['name']}")
+
+# --- التبويب الثاني: غرفة العائلة ونظام الاتصال الصارم ---
+with menu[1]:
+    st.header("💬 غرفة العائلة المغلقة")
+    
+    if current_user['role'] == "مدير العشيرة":
+        st.warning("أنت مدير العشيرة، يمكنك الاطلاع على الرسائل الممررة من الآباء فقط.")
+        approved_msgs = [m for m in st.session_state.messages if m['approved']]
+        if approved_msgs:
+            for m in approved_msgs:
+                st.info(f"**من رئيس الفرع:** {m['approved_by']}\n\n**محتوى الطلب المحال:** {m['text']}")
+        else:
+            st.write("لا توجد طلبات محالة من الآباء حالياً.")
+            
+    else:
+        st.subheader(f"بيت فرع العائلة رقم ({current_user['family_id']})")
+        
+        # صندوق المحادثة والطلبات داخل الفرع
+        room_msgs = [m for m in st.session_state.messages if m['family_id'] == current_user['family_id']]
+        for m in room_msgs:
+            status = "✅ تم تمريره للعشيرة" if m['approved'] else "⏳ ينتظر موافقة الأب"
+            st.text(f"[{m['sender']}]: {m['text']} ({status})")
+            
+            # صلاحية الأب لتمرير الرسالة للعشيرة (الابن لا يرى هذا الزر)
+            if current_user['role'] == "رئيس فرع (أب)" and not m['approved']:
+                if st.button(f"توجيه طلب {m['sender']} إلى إدارة العشيرة", key=f"app_{m['text'][:5]}"):
+                    m['approved'] = True
+                    m['approved_by'] = current_user['name']
+                    st.rerun()
+
+        # إرسال رسالة جديدة داخل الغرفة
+        new_msg = st.text_input("اكتب رسالة أو طلب داخل الغرفة:")
+        if st.button("إرسال داخل الغرفة"):
+            if new_msg:
+                st.session_state.messages.append({
+                    "family_id": current_user['family_id'],
+                    "sender": current_user['name'],
+                    "text": new_msg,
+                    "approved": False,
+                    "approved_by": ""
+                })
+                st.success("تم إرسال الرسالة لغرفة العائلة.")
+                st.rerun()
+
+        # حظر الأبناء من الاتصال المباشر بالعشيرة
+        if current_user['role'] == "فرد (ابن)":
+            st.error("🔒 غير مسموح لك بالاتصال المباشر بالعشيرة. طلباتك ترفع للأب أولاً للموافقة عليها.")
+        elif current_user['role'] == "رئيس فرع (أب)":
+            st.success("🔓 لديك صلاحية الاتصال المباشر بالعشيرة.")
+            direct_msg = st.text_area("أرسل خطابات أو تقارير مباشرة إلى ديوان العشيرة:")
+            if st.button("إرسال مباشر للديوان"):
+                if direct_msg:
+                    st.session_state.messages.append({
+                        "family_id": current_user['family_id'],
+                        "sender": current_user['name'],
+                        "text": direct_msg,
+                        "approved": True,
+                        "approved_by": current_user['name']
+                    })
+                    st.success("تم إرسال الخطاب مباشرة لإدارة العشيرة.")
+                    st.rerun()
+
+# --- التبويب الثالث: الصندوق المالي والتبرعات ---
+with menu[2]:
+    st.header("💳 الصندوق المالي للعشيرة")
+    
+    # نموذج الدفع والتبرع
+    st.subheader("تسجيل دفع / تبرع جديد")
+    pay_type = st.selectbox("نوع الدفع:", ["التبرعات للحسين عليه السلام", "اشتراك العشيرة الشهري", "مساعدات أفراد العائلة (تكافل)"])
+    amount = st.number_input("المبلغ (بالدينار العراقي):", min_value=1000, step=5000)
+    
+    if st.button("تأكيد وإرسال الدفعة"):
+        st.session_state.finance.append({
+            "name": current_user['name'],
+            "type": pay_type,
+            "amount": amount,
+            "family_id": current_user['family_id']
+        })
+        st.success("تم تسجيل المبلغ في الصندوق بنجاح.")
+        st.rerun()
+        
+    # عرض سجل الصندوق المالي مع الحفاظ على السرية
+    st.subheader("📋 سجل المعاملات المالية الحالي")
+    if st.session_state.finance:
+        for f in st.session_state.finance:
+            # شرط السرية: المساعدات تظهر أسماؤها للمدير فقط، وللبقية تظهر كـ "فاعل خير"
+            if f['type'] == "مساعدات أفراد العائلة (تكافل)" and current_user['role'] != "مدير العشيرة":
+                display_name = "🔒 فاعل خير (مساعدات عائلية)"
+            else:
+                display_name = f['name']
+                
+            st.write(f"💰 **{display_name}** دفع مبلغ **{f['amount']:,} دينار** لحساب **[{f['type']}]**")
+    else:
+        st.write("الصندوق فارغ حالياً.")
+
+# --- التبويب الرابع: لوحة الإدارة (الاضافة والتعديل الكامل) ---
+with menu[3]:
+    st.header("🛠️ الإضافة والتعديل (للمدراء ومن يعينهم)")
+    
+    if current_user['role'] == "مدير العشيرة":
+        st.subheader("➕ إضافة فرد أو رئيس فرع جديد للشجرة")
+        new_name = st.text_input("اسم الشخص الكامل:")
+        new_role = st.selectbox("الصفة والصلاحية:", ["فرد (ابن)", "رئيس فرع (أب)", "مدير العشيرة"])
+        new_fam_id = st.number_input("رقم الفرع التابع له:", min_value=0, step=1)
+        new_phone = st.text_input("رقم الموبايل:")
+        
+        if st.button("إضافة الفرد وتحديث الشجرة"):
+            if new_name:
+                new_person = {
+                    "id": len(st.session_state.users) + 1,
+                    "name": new_name,
+                    "role": new_role,
+                    "family_id": new_fam_id,
+                    "phone": new_phone
+                }
+                st.session_state.users = pd.concat([st.session_state.users, pd.DataFrame([new_person])], ignore_index=True)
+                st.success(f"تم إضافة {new_name} بنجاح إلى النظام.")
+                st.rerun()
+                
+        st.subheader("✏️ تعديل بيانات أو صلاحية فرد حالي")
+        edit_user_name = st.selectbox("اختر الشخص المراد تعديل بياناته:", st.session_state.users['name'].tolist())
+        user_idx = st.session_state.users[st.session_state.users['name'] == edit_user_name].index[0]
+        
+        edit_role = st.selectbox("تعديل الصلاحية إلى:", ["فرد (ابن)", "رئيس فرع (أب)", "مدير العشيرة"], index=["فرد (ابن)", "رئيس فرع (أب)", "مدير العشيرة"].index(st.session_state.users.loc[user_idx, 'role']))
+        edit_fam_id = st.number_input("تعديل رقم الفرع:", value=int(st.session_state.users.loc[user_idx, 'family_id']))
+        
+        if st.button("حفظ التعديلات"):
+            st.session_state.users.loc[user_idx, 'role'] = edit_role
+            st.session_state.users.loc[user_idx, 'family_id'] = edit_fam_id
+            st.success("تم تحديث البيانات بنجاح.")
+            st.rerun()
+    else:
+        st.error("🔒 عذراً، هذه اللوحة مخصصة فقط لمدير العشيرة أو من تمنحه الإدارة صلاحية التعديل.")
